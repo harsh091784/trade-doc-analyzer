@@ -8,7 +8,7 @@ const state = {
   selectedStandards: ['ucp600', 'isbp745'],
   analysisHistory: generateSampleHistory(),
   sidebarOpen: false,
-  apiKey: localStorage.getItem('trade_doc_api_key') || 'gen-lang-client-0486229362',
+  apiKey: localStorage.getItem('trade_doc_api_key') || 'AIzaSyBpbrYiVuFjlG5NUSiz-ZTXSJu5hYq0EOw',
 };
 
 // ===== INITIALIZATION =====
