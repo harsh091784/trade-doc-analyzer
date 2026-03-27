@@ -657,7 +657,7 @@ function createProcessingOverlay() {
 
 // ===== REAL AI INTEGRATION (GEMINI) =====
 async function analyzeWithGemini(file, base64Data, docType, standards) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${state.apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${state.apiKey}`;
   
   // Clean base64 string
   const base64DataClean = base64Data.split(',')[1];
