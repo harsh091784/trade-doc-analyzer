@@ -8,6 +8,7 @@ const state = {
   selectedStandards: ['ucp600', 'isbp745'],
   analysisHistory: generateSampleHistory(),
   sidebarOpen: false,
+  apiKey: localStorage.getItem('trade_doc_api_key') || '',
 };
 
 // ===== INITIALIZATION =====
@@ -535,41 +536,83 @@ function getDocTypeName(id) {
 
 // ===== ANALYSIS ENGINE =====
 async function runAnalysis() {
+  if (!state.apiKey) {
+    alert("⚠️ No Google Gemini API key found! \n\nPlease go to Settings and add your API key for real AI analysis. We will run a SIMULATED analysis for now.");
+  }
+
   const processingOverlay = createProcessingOverlay();
   document.body.appendChild(processingOverlay);
 
-  const steps = [
-    'Parsing document content...',
-    'Extracting key fields & data...',
-    'Validating format & structure...',
-    'Checking against selected standards...',
-    'Computing compliance score...',
-    'Generating detailed report...',
-  ];
+  let results;
+  const isRealAI = state.apiKey && state.uploadedFiles.length > 0;
 
-  for (let i = 0; i < steps.length; i++) {
-    await delay(600 + Math.random() * 400);
-    const stepEls = processingOverlay.querySelectorAll('.processing-step');
-    if (i > 0) {
-      stepEls[i - 1].classList.remove('active');
-      stepEls[i - 1].classList.add('done');
-      stepEls[i - 1].querySelector('.processing-step-icon').innerHTML = '✓';
+  if (isRealAI) {
+    try {
+      // Setup progress animation for real AI
+      const stepEls = processingOverlay.querySelectorAll('.processing-step');
+      stepEls[0].classList.add('active'); // Parsing document
+      
+      // Get base64 data of the first uploaded file
+      const file = state.uploadedFiles[0];
+      const base64Data = await fileToBase64(file);
+      
+      stepEls[0].classList.remove('active');
+      stepEls[0].classList.add('done');
+      stepEls[0].querySelector('.processing-step-icon').innerHTML = '✓';
+      
+      stepEls[1].classList.add('active'); // Extracting & AI Analysis
+      
+      // Call Gemini API
+      results = await analyzeWithGemini(file, base64Data, state.selectedDocType, state.selectedStandards);
+      
+      // Mark remaining steps as done quickly
+      for (let i = 1; i < stepEls.length; i++) {
+        stepEls[i].classList.remove('active');
+        stepEls[i].classList.add('done');
+        stepEls[i].querySelector('.processing-step-icon').innerHTML = '✓';
+        await delay(200);
+      }
+    } catch (error) {
+      console.error("AI Analysis Error:", error);
+      alert("AI Analysis failed: " + error.message + "\n\nFalling back to simulated analysis.");
+      results = generateAnalysisResults(); // Fallback
     }
-    stepEls[i].classList.add('active');
+  } else {
+    // Simulated animation
+    const steps = [
+      'Parsing document content...',
+      'Extracting key fields & data...',
+      'Validating format & structure...',
+      'Checking against selected standards...',
+      'Computing compliance score...',
+      'Generating detailed report...',
+    ];
+
+    for (let i = 0; i < steps.length; i++) {
+      await delay(600 + Math.random() * 400);
+      const stepEls = processingOverlay.querySelectorAll('.processing-step');
+      if (i > 0) {
+        stepEls[i - 1].classList.remove('active');
+        stepEls[i - 1].classList.add('done');
+        stepEls[i - 1].querySelector('.processing-step-icon').innerHTML = '✓';
+      }
+      stepEls[i].classList.add('active');
+    }
+
+    await delay(800);
+    const lastStep = processingOverlay.querySelectorAll('.processing-step');
+    lastStep[steps.length - 1].classList.remove('active');
+    lastStep[steps.length - 1].classList.add('done');
+    lastStep[steps.length - 1].querySelector('.processing-step-icon').innerHTML = '✓';
+    
+    results = generateAnalysisResults(); // Simulated results
   }
 
-  await delay(800);
-  // Mark last step as done
-  const lastStep = processingOverlay.querySelectorAll('.processing-step');
-  lastStep[steps.length - 1].classList.remove('active');
-  lastStep[steps.length - 1].classList.add('done');
-  lastStep[steps.length - 1].querySelector('.processing-step-icon').innerHTML = '✓';
 
   await delay(400);
   document.body.removeChild(processingOverlay);
 
   // Generate and show results
-  const results = generateAnalysisResults();
   showAnalysisResults(results);
 
   // Add to history
@@ -610,6 +653,98 @@ function createProcessingOverlay() {
     </div>
   `;
   return overlay;
+}
+
+// ===== REAL AI INTEGRATION (GEMINI) =====
+async function analyzeWithGemini(file, base64Data, docType, standards) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${state.apiKey}`;
+  
+  // Clean base64 string
+  const base64DataClean = base64Data.split(',')[1];
+  
+  // Standard names for the prompt
+  const standardNames = standards.map(s => {
+    const map = { ucp600: 'UCP 600', isbp745: 'ISBP 745', incoterms2020: 'Incoterms 2020', eucp: 'eUCP', urr725: 'URR 725' };
+    return map[s] || s;
+  }).join(', ');
+  
+  const docTypeName = getDocTypeName(docType);
+
+  const prompt = `
+You are an expert Senior Trade Finance Bank Analyst. Analyze the attached ${docTypeName} against the following international standards: ${standardNames}.
+
+Your task is to identify if the document complies with these standards, finding any discrepancies, errors, or missing information.
+Return the output EXACTLY in this JSON format without any markdown blocks or extra text:
+
+{
+  "overallScore": number (0-100),
+  "checks": [
+    {
+      "name": "Short name of the check (e.g. 'Invoice Number', 'Date of Issue')",
+      "detail": "Detailed explanation of what you found or verified in the document",
+      "status": "pass" | "fail" | "warn",
+      "standard": "Standard Reference (e.g. 'UCP 600 Art. 18' or 'ISBP 745')"
+    }
+  ]
+}
+
+Ensure there are between 6 to 10 checks. Be extremely strict and realistic.
+  `;
+
+  const requestBody = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        {
+          inlineData: {
+            mimeType: file.type || 'application/pdf',
+            data: base64DataClean
+          }
+        }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json"
+    }
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API Error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  let textResponse = data.candidates[0].content.parts[0].text;
+  
+  try {
+    // Strip markdown formatting if Gemini adds it
+    textResponse = textResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const parsedData = JSON.parse(textResponse);
+    
+    // Calculate counts
+    const passCount = parsedData.checks.filter(c => c.status === 'pass').length;
+    const failCount = parsedData.checks.filter(c => c.status === 'fail').length;
+    const warnCount = parsedData.checks.filter(c => c.status === 'warn').length;
+    
+    return {
+      checks: parsedData.checks,
+      overallScore: parsedData.overallScore,
+      passCount,
+      failCount,
+      warnCount,
+      total: parsedData.checks.length,
+      docType: docType || 'other'
+    };
+  } catch (e) {
+    throw new Error("Failed to parse AI response as JSON.");
+  }
 }
 
 function generateAnalysisResults() {
@@ -968,6 +1103,22 @@ function renderSettings() {
     <div class="settings-section">
       <div class="settings-group">
         <div class="settings-group-header">
+          <h3>AI Configuration</h3>
+          <p>Connect to Google Gemini API for real document analysis</p>
+        </div>
+        <div class="settings-row">
+          <div style="width: 100%;">
+            <div class="settings-label">Google Gemini API Key</div>
+            <div class="settings-desc">Get your free key from <a href="https://aistudio.google.com" target="_blank" style="color: var(--primary);">aistudio.google.com</a></div>
+            <input type="password" id="settingApiKey" class="settings-input" placeholder="AIzaSy..." value="${state.apiKey}" style="width: 100%; max-width: 400px; padding: 10px; border: 1px solid var(--gray-300); border-radius: 4px; margin-top: 8px; font-family: monospace;" />
+            <button id="saveApiKeyBtn" class="btn-primary" style="margin-top: 8px; padding: 8px 16px;">Save Key</button>
+            <span id="apiKeySaveStatus" style="font-size: 13px; color: var(--success); margin-left: 12px; display: none;">Saved!</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-header">
           <h3>Analysis Preferences</h3>
           <p>Configure how documents are analyzed against standards</p>
         </div>
@@ -1098,8 +1249,25 @@ function renderSettings() {
           </label>
         </div>
       </div>
+      </div>
     </div>
   `;
+
+  // Attach API Key save handler
+  setTimeout(() => {
+    const saveBtn = document.getElementById('saveApiKeyBtn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => {
+        const key = document.getElementById('settingApiKey').value.trim();
+        state.apiKey = key;
+        localStorage.setItem('trade_doc_api_key', key);
+        
+        const status = document.getElementById('apiKeySaveStatus');
+        status.style.display = 'inline-block';
+        setTimeout(() => { status.style.display = 'none'; }, 2000);
+      });
+    }
+  }, 0);
 }
 
 // ===== SAMPLE DATA =====
@@ -1141,6 +1309,15 @@ function generateSampleHistory() {
 }
 
 // ===== UTILITIES =====
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
+}
+
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;
