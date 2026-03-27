@@ -8,7 +8,7 @@ const state = {
   selectedStandards: ['ucp600', 'isbp745'],
   analysisHistory: generateSampleHistory(),
   sidebarOpen: false,
-  apiKey: localStorage.getItem('trade_doc_api_key') || 'AIzaSyBpbrYiVuFjlG5NUSiz-ZTXSJu5hYq0EOw',
+  apiKey: localStorage.getItem('trade_doc_api_key') || 'AIzaSyCkyh3fIhBlTcDNnH4O_8z_3Z1PhvDJ3XM',
 };
 
 // ===== INITIALIZATION =====
@@ -574,8 +574,9 @@ async function runAnalysis() {
       }
     } catch (error) {
       console.error("AI Analysis Error:", error);
-      alert("AI Analysis failed: " + error.message + "\n\nFalling back to simulated analysis.");
-      results = generateAnalysisResults(); // Fallback
+      document.body.removeChild(processingOverlay);
+      alert(`Backend Analysis Failed!\n\nReason: ${error.message}\n\nPlease check your API key validity or upload a supported document (PDF, PNG, JPG).`);
+      return; // Stop execution, don't fallback silently
     }
   } else {
     // Simulated animation
